@@ -1,0 +1,18 @@
+{
+    "name": "Filecoin Assets Backup",
+    "description": "This upgrade will ensure your NFT's media and metadata are perpetually hosted on IPFS using Filecoin. Decentralized hosting such as IPFS future-proofs your token by making sure it's assets are always accessible if servers go down.",
+    "image": "https://bafybeianeb65hictyohrvdfz35xhx7chrm4qt7hpaqjacstl3vtgoo4bnu.ipfs.dweb.link/assets/filecoin-upgrade.png",
+    "attributes": [{
+        "trait_type": "Type", 
+        "value": "upgrade" 
+    },{
+        "trait_type": "Action", 
+        "value": "filecoinBackup" 
+    }],
+    "enrichment": {
+        "type": "upgrade",
+        "action": "filecoinBackup",
+        "price": "0.001",
+        "rarity": "common"
+    }
+}

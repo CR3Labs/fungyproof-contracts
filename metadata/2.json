@@ -1,0 +1,18 @@
+{
+    "name": "FungyProof Minimal Case",
+    "description": "The minimalistic FungyProof NFT case. This case is proof your NFT has been added to the registry.",
+    "image": "https://arweave.net/TpWAdnaudQFWqkOMEVr07r2xOnC1nl-xfoMU_q-1nYU",
+    "attributes": [{
+        "trait_type": "Type", 
+        "value": "case" 
+    },{
+        "trait_type": "Action", 
+        "value": "register" 
+    }],
+    "enrichment": {
+        "type": "case",
+        "action": "register",
+        "price": "0.04",
+        "rarity": "common"
+    }
+}
