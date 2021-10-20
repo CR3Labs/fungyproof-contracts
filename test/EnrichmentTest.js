@@ -43,6 +43,8 @@ describe('FungyProofEnrichments', async function () {
       expect(d).to.be.equal(deployer);
     });
 
+    // TODO test Proxy Upgrade
+
     it('Should mint an enrichment', async () => {
       // mint an enrichment
       await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
@@ -54,22 +56,30 @@ describe('FungyProofEnrichments', async function () {
       expect(supply).to.be.equal(10);
     });
 
-    it('Should batch an enrichment', async () => {
+    it('Should batch mint enrichments', async () => {
       // mint an enrichment
       await enrichment.mintBatch(
         deployer, 
         [5, 9], 
         ['ceramic://test1','ceramic://test2'], 
-        [ethers.utils.parseEther('0.02'), ethers.utils.parseEther('0.02')],
+        [ethers.utils.parseEther('0.02'), ethers.utils.parseEther('0.01')],
         [true, false], {
         from: deployer
       }).then(t => t.wait());
 
       const supply1 = await enrichment.totalSupply(2);
       const supply2 = await enrichment.totalSupply(3);
+      const uri1 = await enrichment.uri(2);
+      const uri2 = await enrichment.uri(3);
+      const price1 = await enrichment.priceOf(2);
+      const price2 = await enrichment.priceOf(3);
 
       expect(supply1.toString()).to.be.equal('5');
       expect(supply2.toString()).to.be.equal('9');
+      expect(uri1).to.be.equal('ceramic://test1');
+      expect(uri2).to.be.equal('ceramic://test2');
+      expect(price1.toString()).to.be.equal('20000000000000000');
+      expect(price2.toString()).to.be.equal('10000000000000000');
     });
 
     it('Should allow minting only from deployer address', async () => {

@@ -26,7 +26,10 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256 indexed tokenId,
         uint256 enrichmentId
     );
-    event Purchase(address indexed operator, uint256 indexed enrichmentId);
+    event Purchase(
+        address indexed operator, 
+        uint256 indexed enrichmentId
+    );
 
     // Mapping of enrichmentIds to prices (in wei)
     mapping(uint256 => uint256) private _prices;
