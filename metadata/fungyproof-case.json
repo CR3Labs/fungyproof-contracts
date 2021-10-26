@@ -1,0 +1,18 @@
+{
+    "name": "FungyProof Case",
+    "description": "The FungyProof Case protects your NFT. Once encased, your token is backed up into decentralized storage and added to the registry.",
+    "image": "https://bafybeig5hpuvjqibcicafmxn3cxkjuxoy4vlwdg4cih6jrwwbqc6ttx7v4.ipfs.dweb.link/fungyproof-case.png",
+    "attributes": [{
+        "trait_type": "Generation", 
+        "value": "1"
+    },{
+        "trait_type": "Action", 
+        "value": "Backup" 
+    },{
+        "trait_type": "Rarity", 
+        "value": "Common" 
+    },{
+        "trait_type": "Type", 
+        "value": "Case" 
+    }]
+}

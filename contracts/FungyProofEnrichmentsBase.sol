@@ -2,34 +2,41 @@
 
 pragma solidity 0.8.4;
 
-import "./ERC1155URIBaseUpgradeable.sol";
+import "./helpers/WordCodec.sol";
+import "./tokens/ERC1155URIBaseUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
 
 contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
-    using CountersUpgradeable for CountersUpgradeable.Counter;
-    CountersUpgradeable.Counter private _tokenIds;
+    using WordCodec for bytes32;
 
     string public name;
     string public symbol;
 
-    event Bind(
+    event BindEnrichment(
         address indexed operator,
         address indexed contractAddress,
         uint256 indexed tokenId,
         uint256 enrichmentId,
         string uri
     );
-    event Unbind(
+    event UnbindEnrichment(
         address indexed operator,
         address indexed contractAddress,
         uint256 indexed tokenId,
         uint256 enrichmentId
     );
-    event Purchase(
-        address indexed operator, 
+    event PurchaseEnrichment(
+        address indexed operator,
         uint256 indexed enrichmentId
     );
+
+    // Payee address
+    address private _payee;
+
+    // Holds current enrichmentId
+    // restricted to 96bits to
+    // support enrichment keys
+    uint96 private _enrichmentId;
 
     // Mapping of enrichmentIds to prices (in wei)
     mapping(uint256 => uint256) private _prices;
@@ -37,16 +44,29 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // Mapping of enrichmentIds to enrichment permanence
     mapping(uint256 => bool) private _isPermanent;
 
-    // Mapping of enrichmentId -> contractAddress -> tokenId -> enrichment balance
-    mapping(uint256 => mapping(address => mapping(uint256 => uint256)))
-        private _enrichmentBalances;
+    // [   1 bit   |  255 bits ]
+    // [ perm flag |   price   ]
+    // |MSB                 LSB|
+    uint256 private constant _PRICE_OFFSET = 0;
+    uint256 private constant _PERMANENT_FLAG_OFFSET = 255;
 
-    // Mapping of enrichmentId -> contractAddress -> tokenId -> enrichment URI
-    mapping(uint256 => mapping(address => mapping(uint256 => string)))
-        private _enrichmentURIs;
+    // Mapping of enrichmentIds to prices (in wei) and permanence
+    mapping(uint256 => bytes32) private _enrichmentState;
+
+    // Define an EnrichmentID as the concatenation of the id and contract address
+    // (this limits the number of ids to 2^96 - 1; should be enough)
+    // [ 160 bits |  96 bits ]
+    // [ address  |    ID    ]
+    // |MSB               LSB|
+    //
+    // Mapping of enrichmentKey -> tokenId -> enrichment balance
+    mapping(bytes32 => mapping(uint256 => uint256)) private _enrichmentBalances;
+
+    // Mapping of enrichmentKey -> tokenId -> enrichment URI
+    mapping(bytes32 => mapping(uint256 => string)) private _enrichmentURIs;
 
     // Mapping of contract addresses to ownerOf(uint256) functions
-    // DEV: only functions which recieve a uint256 and return an address are supported
+    // DEV: only functions which receive a uint256 and return an address are supported
     mapping(address => string) private _contractOwnerOfFunctions;
 
     function __FungyProofEnrichmentsBase_init_unchained(
@@ -57,6 +77,51 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         symbol = symbol_;
     }
 
+    /**
+     * @dev Sets the payee address
+     *
+     * Requirements:
+     *
+     * - `payee` cannot be the zero address.
+     */
+    function setPayee(address payee_) public virtual onlyOwner {
+        require(payee_ != address(0), "FPNFE: set payee to zero address");
+        _payee = payee_;
+    }
+
+    /**
+     * @dev return the current payee
+     */
+    function payee() public view virtual returns (address) {
+        return _payee;
+    }
+
+    /**
+     * @dev Sets ownerOf functions.
+     *
+     * This is necessary to enable enrichment
+     * support for non-standard NFTs which
+     * are not yet known.
+     */
+    function setOwnerOfFunction(
+        address contractAddress,
+        string memory ownerOfFunc
+    ) public virtual onlyOwner {
+        _contractOwnerOfFunctions[contractAddress] = ownerOfFunc;
+    }
+
+    /**
+     * @dev Mint a new enrichment token.
+     *
+     * Auto increments tokenId, sets the tokenURI
+     * and sets price / permanence flag
+     *
+     * Requirements:
+     *
+     * - `to` cannot be the zero address.
+     * - `price` must be > 0
+     * - `amount` must be > 0
+     */
     function mint(
         address to,
         uint256 amount,
@@ -64,25 +129,31 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256 price,
         bool permanent
     ) public virtual onlyOwner {
-        require(
-            to != address(0),
-            "FungyProofEnrichments: mint to the zero address"
-        );
-        require(price >= 0, "FungyProofEnrichments: price must be >= 0");
-        require(amount > 0, "FungyProofEnrichments: amount must be > 0");
+        require(to != address(0), "FPNFE: mint to the zero address");
+        require(price >= 0, "FPNFE: price must be >= 0");
+        require(amount > 0, "FPNFE: amount must be > 0");
 
-        _tokenIds.increment();
-        uint256 newItemId = _tokenIds.current();
+        uint256 newEnrichmentId = _incrementEnrichmentId();
 
         if (bytes(uri).length > 0) {
-            _setTokenURI(newItemId, uri);
+            _setTokenURI(newEnrichmentId, uri);
         }
 
-        _prices[newItemId] = price;
-        _isPermanent[newItemId] = permanent;
-        _mint(to, newItemId, amount, "");
+        _setPriceAndPermanence(newEnrichmentId, price, permanent);
+        _mint(to, newEnrichmentId, amount, "");
     }
 
+    /**
+     * @dev Batch mint enrichments
+     *
+     * Auto increments tokenIds, sets tokenURIs
+     * and sets price / permanence flags
+     *
+     * Requirements:
+     *
+     * - `to` cannot be the zero address.
+     * - all parameter lengths must match.
+     */
     function mintBatch(
         address to,
         uint256[] memory amounts,
@@ -90,35 +161,37 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256[] memory prices,
         bool[] memory permanents
     ) public virtual onlyOwner {
-        require(
-            to != address(0),
-            "FungyProofEnrichments: mint to the zero address"
-        );
+        require(to != address(0), "FPNFE: mint to the zero address");
         require(
             (amounts.length == uris.length &&
                 uris.length == prices.length &&
                 prices.length == permanents.length),
-            "FungyProofEnrichments: parameter lengths mismatch"
+            "FPNFE: param length mismatch"
         );
 
         uint256[] memory ids = new uint256[](amounts.length);
 
         for (uint256 i = 0; i < amounts.length; i++) {
-            _tokenIds.increment();
-            uint256 newItemId = _tokenIds.current();
-            ids[i] = newItemId;
+            uint256 newEnrichmentId = _incrementEnrichmentId();
+            ids[i] = newEnrichmentId;
 
             if (bytes(uris[i]).length > 0) {
-                _setTokenURI(newItemId, uris[i]);
+                _setTokenURI(newEnrichmentId, uris[i]);
             }
 
-            _prices[newItemId] = prices[i];
-            _isPermanent[newItemId] = permanents[i];
+            _setPriceAndPermanence(newEnrichmentId, prices[i], permanents[i]);
         }
 
         _mintBatch(to, ids, amounts, "");
     }
 
+    /**
+     * @dev Bind an enrichment to a token
+     *
+     * Transfers enrichment to contract,
+     * sets enrichment URI for this binding
+     * and increments the tokens enrichment balance
+     */
     function bind(
         address contractAddress,
         uint256 tokenId,
@@ -127,85 +200,136 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     ) public virtual {
         require(
             enrichmentBalanceOf(contractAddress, tokenId, enrichmentId) == 0,
-            "FungyProofEnrichments: token already has this enrichment"
-        );
-        require(
-            balanceOf(_msgSender(), enrichmentId) > 0,
-            "FungyProofEnrichments: sender does not own enrichment"
+            "FPNFE: token has enrichment"
         );
 
         address operator = _msgSender();
 
         require(
+            balanceOf(operator, enrichmentId) > 0,
+            "FPNFE: not enrichment owner"
+        );
+
+        require(
             _ownsToken(contractAddress, tokenId, operator),
-            "FungyProofEnrichments: sender does not own token"
+            "FPNFE: not token owner"
         );
 
         // transfer enrichment to contract
         _safeTransferFrom(operator, address(this), enrichmentId, 1, "");
 
-        // bind the enrichment
-        // TODO convert contractAddress, tokenId to key instead of nested maps?
-        _enrichmentURIs[enrichmentId][contractAddress][tokenId] = uri;
-        _enrichmentBalances[enrichmentId][contractAddress][tokenId] += 1;
+        // set uri and balances using enrichment key
+        bytes32 enrichmentKey = _encodeEnrichmentKey(
+            contractAddress,
+            uint96(enrichmentId)
+        );
 
-        emit Bind(operator, contractAddress, tokenId, enrichmentId, uri);
+        _enrichmentURIs[enrichmentKey][tokenId] = uri;
+        _enrichmentBalances[enrichmentKey][tokenId] += 1;
+
+        emit BindEnrichment(
+            operator,
+            contractAddress,
+            tokenId,
+            enrichmentId,
+            uri
+        );
     }
 
+    /**
+     * @dev Unbind an enrichment from a token
+     *
+     * Transfers enrichment back to nft owner,
+     * unsets enrichment URI for this binding
+     * and decrements the tokens enrichment balance
+     *
+     * Requirements:
+     * - enrichment can not be flagged as permanent
+     */
     function unbind(
         address contractAddress,
         uint256 tokenId,
         uint256 enrichmentId
     ) public virtual {
+        bytes32 enrichmentKey = _encodeEnrichmentKey(
+            contractAddress,
+            uint96(enrichmentId)
+        );
+
         require(
-            _enrichmentBalances[enrichmentId][contractAddress][tokenId] >= 0,
-            "FungyProofEnrichments: enrichment is not bound"
+            _enrichmentBalances[enrichmentKey][tokenId] >= 0,
+            "FPNFE: not bound"
         );
         require(
-            _isPermanent[enrichmentId] != true,
-            "FungyProofEnrichments: enrichment cannot be unbound"
+            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET) !=
+                true,
+            "FPNFE: cant be unbound"
         );
 
         address operator = _msgSender();
 
         require(
             _ownsToken(contractAddress, tokenId, operator),
-            "FungyProofEnrichments: sender does not own token"
+            "FPNFE: sender does not own token"
         );
 
         // unbind the enrichment
-        // TODO convert contractAddress, tokenId to key instead of nested maps?
-        _enrichmentURIs[enrichmentId][contractAddress][tokenId] = "";
-        _enrichmentBalances[enrichmentId][contractAddress][tokenId] -= 1;
+        _enrichmentURIs[enrichmentKey][tokenId] = "";
+        _enrichmentBalances[enrichmentKey][tokenId] -= 1;
 
         // transfer enrichment back to owner
         _safeTransferFrom(address(this), operator, enrichmentId, 1, "");
 
-        emit Unbind(operator, contractAddress, tokenId, enrichmentId);
+        emit UnbindEnrichment(operator, contractAddress, tokenId, enrichmentId);
     }
 
+    /**
+     * @dev Purchase an enrichment
+     *
+     * If the contract owner address contains
+     * a balance for this enrichmentId, transfer
+     * the enrichment to the sender.
+     *
+     * This implementation uses a PullPayment strategy
+     * to transfer the exact amount to the PulPayment
+     * contract. Checking the exact balance is fine for
+     * our purposes because all prices will be a fixed
+     * round number set directly by the FP team. Unbindable
+     * enrichments can be traded on open markets
+     * and will not require this purchase functionality.
+     *
+     * Requirements:
+     * - enrichment can not be flagged as permanent
+     */
     function purchase(uint256 enrichmentId) public payable virtual {
         address operator = _msgSender();
         address owner_ = owner();
+        address payee_ = payee();
+
+        require(payee_ != address(0), "FPNFE: payee has not been set");
 
         require(
             balanceOf(owner_, enrichmentId) > 0,
-            "FungyProofEnrichments: enrichment is not available for purchase"
+            "FPNFE: purchase not available"
         );
 
         // take payment using _asyncTransfer
         require(
-            msg.value == _prices[enrichmentId],
-            "FungyProofEnrichments: wrong payment value"
+            msg.value ==
+                _enrichmentState[enrichmentId].decodeUint255(_PRICE_OFFSET),
+            "FPNFE: wrong payment value"
         );
-        _asyncTransfer(owner_, msg.value);
+        _asyncTransfer(payee_, msg.value);
 
         // transfer enrichment to address
         _safeTransferFrom(owner_, operator, enrichmentId, 1, "");
 
-        emit Purchase(operator, enrichmentId);
+        emit PurchaseEnrichment(operator, enrichmentId);
     }
 
+    /**
+     * @dev Convenience function to Purchase and Bind
+     */
     function purchaseAndBind(
         uint256 enrichmentId,
         address contractAddress,
@@ -216,69 +340,115 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         bind(contractAddress, tokenId, enrichmentId, uri);
     }
 
+    /**
+     * @dev Return the price of an enrichment
+     */
     function priceOf(uint256 enrichmentId)
         public
         view
         virtual
         returns (uint256)
     {
-        return _prices[enrichmentId];
+        return _enrichmentState[enrichmentId].decodeUint255(_PRICE_OFFSET);
     }
 
+    /**
+     * @dev Return the enrichment permanent flag
+     */
     function isPermanent(uint256 enrichmentId)
         public
         view
         virtual
         returns (bool)
     {
-        return _isPermanent[enrichmentId];
+        return
+            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET);
     }
 
-    function setOwnerOfFunction(
-        address contractAddress,
-        string memory ownerOfFunc
-    ) public virtual onlyOwner {
-        _contractOwnerOfFunctions[contractAddress] = ownerOfFunc;
-    }
-
+    /**
+     * @dev Return a tokens balance of an enrichment
+     */
     function enrichmentBalanceOf(
         address contractAddress,
         uint256 tokenId,
         uint256 enrichmentId
     ) public view virtual returns (uint256) {
-        return _enrichmentBalances[enrichmentId][contractAddress][tokenId];
+        bytes32 enrichmentKey = _encodeEnrichmentKey(
+            contractAddress,
+            uint96(enrichmentId)
+        );
+        return _enrichmentBalances[enrichmentKey][tokenId];
     }
 
+    /**
+     * @dev Return a bound enrichments URI
+     */
     function enrichmentURI(
         address contractAddress,
         uint256 tokenId,
         uint256 enrichmentId
     ) public view virtual returns (string memory) {
-        return _enrichmentURIs[enrichmentId][contractAddress][tokenId];
+        bytes32 enrichmentKey = _encodeEnrichmentKey(
+            contractAddress,
+            uint96(enrichmentId)
+        );
+        return _enrichmentURIs[enrichmentKey][tokenId];
     }
 
+    /**
+     * @dev Increments the current enrichmentId
+     */
+    function _incrementEnrichmentId() internal returns (uint96) {
+        _enrichmentId += 1;
+        return _enrichmentId;
+    }
+
+    /**
+     * @dev Set the price and permanence for an enrichment
+     */
+    function _setPriceAndPermanence(
+        uint256 enrichmentId,
+        uint256 price,
+        bool permanent
+    ) private {
+        bytes32 enrichmentState;
+
+        _enrichmentState[enrichmentId] = enrichmentState
+            .insertUint255(price, _PRICE_OFFSET)
+            .insertBool(permanent, _PERMANENT_FLAG_OFFSET);
+    }
+
+    /**
+     * @dev Check if an NFT is owned by msg.sender
+     *
+     * Requirements:
+     * - `contractAddress` cannot be the zero address.
+     * - must be a successful staticcall
+     */
     function _ownsToken(
         address contractAddress,
         uint256 tokenId,
         address owner
-    ) private returns (bool) {
+    ) private view returns (bool) {
         require(
             contractAddress != address(0),
-            "FungyProofEnrichments: invalid contract address"
+            "FPNFE: invalid contract address"
         );
         string memory func = (bytes(_contractOwnerOfFunctions[contractAddress])
             .length != 0)
             ? _contractOwnerOfFunctions[contractAddress]
             : "ownerOf(uint256)";
         bytes memory payload = abi.encodeWithSignature(func, tokenId);
-        (bool success, bytes memory returnData) = contractAddress.call(payload);
-        require(
-            success,
-            "FungyProofEnrichments: unable to determine token owner"
+        (bool success, bytes memory returnData) = contractAddress.staticcall(
+            payload
         );
+        require(success, "FPNFE: cant determine owner");
         return (_bytesToAddress(returnData) == owner);
     }
 
+    /**
+     * @dev convert bytes to an address
+     */
     function _bytesToAddress(bytes memory bys)
         private
         pure
@@ -287,6 +457,24 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         assembly {
             addr := mload(add(bys, 32))
         }
+    }
+
+    /**
+     * @dev Encode contract/enrichmentId to key
+     *
+     * Layout is: | 20 byte address | 12 byte ID |
+     */
+    function _encodeEnrichmentKey(address contractAddress, uint256 enrichmentId)
+        private
+        pure
+        returns (bytes32)
+    {
+        bytes32 serialized;
+
+        serialized |= bytes32(uint256(enrichmentId));
+        serialized |= bytes32(uint256(uint160(contractAddress))) << (12 * 8);
+
+        return serialized;
     }
 
     uint256[50] private __gap;

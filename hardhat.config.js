@@ -1,23 +1,24 @@
-const { utils } = require("ethers");
-const fs = require("fs");
-const path = require("path");
-const chalk = require("chalk");
+const { utils } = require('ethers');
+const fs = require('fs');
+const path = require('path');
+const chalk = require('chalk');
 
-require("@nomiclabs/hardhat-waffle");
-require("@tenderly/hardhat-tenderly");
-require("hardhat-deploy");
-require("@eth-optimism/hardhat-ovm");
-require("@nomiclabs/hardhat-ethers");
+require('@nomiclabs/hardhat-solhint');
+require('@nomiclabs/hardhat-waffle');
+require('@tenderly/hardhat-tenderly');
+require('hardhat-deploy');
+require('@eth-optimism/hardhat-ovm');
+require('@nomiclabs/hardhat-ethers');
 require('@openzeppelin/hardhat-upgrades');
 
 require('dotenv').config();
 
 const { isAddress, getAddress, formatUnits, parseUnits } = utils;
 
-const { 
+const {
   INFURA_API_KEY,
   STAGE_SEED_PHRASE,
-  PROD_SEED_PHRASE  
+  PROD_SEED_PHRASE
 } = process.env;
 
 //
@@ -217,9 +218,104 @@ function debug(text) {
 
 // ---- Helper Tasks ------
 
+task("setup", "Sets up enrichments contract")
+  .addPositionalParam("payee", "Payee address to set")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    // set payee
+    await enrichments.setPayee(args.payee).then(tx => tx.wait());
+
+    // set mapped functions
+    // TODO cryptopunks, anything else?
+
+    const result = await enrichments.mintBatch(
+      deployer, 
+      [5000, 1000], 
+      [
+        'https://bafybeidiwfie42gppy7y7wdfx7emucc44mw7egv6m7eyrvgenldik5xb7i.ipfs.dweb.link/fungyproof-case.json',
+        'https://bafybeiattz57nv7qqrnktz57bhkmdgqwuqwk4jvgosf5p6djuicflmbntm.ipfs.dweb.link/fungyproof-neon-green-case.json'
+      ], 
+      [ethers.utils.parseEther('0.02'), ethers.utils.parseEther('0.04')], 
+      [true, true],
+      {
+        gasLimit: 500000,
+        from: deployer
+      }).then(tx => tx.wait())
+
+    // log results
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+task("setPayee", "Set the contracts payee")
+  .addPositionalParam("payee", "Payee address to set")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    // set payee
+    const result = await enrichments.setPayee(args.payee, {
+      gasLimit: 40000,
+      from: deployer
+    }).then(tx => tx.wait());
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+task("printPayee", "Print the contracts payee")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    // get payee
+    const result = await enrichments.payee();
+    console.log(result);
+  });
+
+task("withdraw", "Withdraw from the PullPayment contract")
+  .addPositionalParam("payee", "Payee address to withraw from")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    // withdraw for payee
+    const result = await enrichments.withdrawPayments(args.payee, {
+      gasLimit: 60000,
+      from: deployer
+    }).then(tx => tx.wait());
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+task("printPayments", "print available balance from the PullPayment contract")
+  .addPositionalParam("payee", "Payee address to withraw from")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    // print for payee
+    const payments = await enrichments.payments(args.payee);
+    console.log(payments.toString());
+  });
+
 task("mintNft", "Mints an NFT")
   .addPositionalParam("to", "The to address")
   .addPositionalParam("uri", "The NFTs URI")
+  .addPositionalParam("id", "The NFTs ID")
   .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
     const { deploy } = deployments;
     const { deployer } = await getNamedAccounts();
@@ -237,42 +333,6 @@ task("mintNft", "Mints an NFT")
     console.log(JSON.stringify(result, null, 2));
   });
 
-task("setupEnrichments", "Sets up enrichments contract")
-  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
-    const { deployer } = await getNamedAccounts();
-
-    const deployed = await deployments.get("FungyProofEnrichments", deployer);
-    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
-    const enrichments = await Enrichments.attach(deployed.address);
-    
-    // set mapped functions
-    // TODO
-
-    // common case
-    console.log(JSON.stringify(await enrichments.mint(deployer, 1000000000, 'https://arweave.net/H74TTs76tIA-mo-HqZrYdavxFM-vgiCAZOgmePeK5O8', ethers.utils.parseEther('0.02'), { 
-      gasLimit: 250000,
-      from: deployer
-    }).then(tx => tx.wait())), null, 2);
-
-    // minimal case
-    console.log(JSON.stringify(await enrichments.mint(deployer, 1000000000, 'https://arweave.net/DhiEvZ6yXzFbTpMg2irS3oiHe9sD6T99bPcn_s5VYF4', ethers.utils.parseEther('0.04'), { 
-      gasLimit: 250000,
-      from: deployer
-    }).then(tx => tx.wait()), null, 2));
-
-    // filecoin backup
-    console.log(JSON.stringify(await enrichments.mint(deployer, 1000000000, 'https://arweave.net/HasaQhAb1B8AxOPMhQzUaUfb5r2P9U5jTtdQgQzoYIU', ethers.utils.parseEther('0.01'), { 
-      gasLimit: 250000,
-      from: deployer
-    }).then(tx => tx.wait()), null, 2));
-
-    // arweave backup
-    console.log(JSON.stringify(await enrichments.mint(deployer, 1000000000, 'https://arweave.net/cXdd6jgsZO_ZnQj407iQO4XxNNuSJ2T36eAYwIgigJk', ethers.utils.parseEther('0.01'), { 
-      gasLimit: 250000,
-      from: deployer
-    }).then(tx => tx.wait()), null, 2));
-  });
-
 task("mintEnrichment", "Mints an Enrichment")
   .addPositionalParam("to", "Mint to address")
   .addPositionalParam("amount", "Supply for this Enrichment")
@@ -286,10 +346,27 @@ task("mintEnrichment", "Mints an Enrichment")
     const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
     const enrichments = await Enrichments.attach(deployed.address);
 
-    const result = await enrichments.mint(args.to, Number(args.amount), args.uri, ethers.utils.parseEther(args.price), { 
+    const result = await enrichments.mint(args.to, Number(args.amount), args.uri, ethers.utils.parseEther(args.price), {
       gasLimit: 200000,
       from: deployer
     }).then(tx => tx.wait());
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+task("bindEnrichment", "Bind enrichment to an NFT")
+  .addPositionalParam("address", "Contract address")
+  .addPositionalParam("tokenId", "Token ID")
+  .addPositionalParam("enrichmentId", "The Enrichments ID")
+  .addPositionalParam("uri", "The Enrichment URI")
+  .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
+    const { deploy } = deployments;
+    const { deployer } = await getNamedAccounts();
+
+    const deployed = await deployments.get("FungyProofEnrichments", deployer);
+    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
+    const enrichments = await Enrichments.attach(deployed.address);
+
+    const result = await enrichments.enrich(args.address, args.tokenId, args.enrichmentId, args.uri).then(tx => tx.wait());
     console.log(JSON.stringify(result, null, 2));
   });
 
@@ -305,47 +382,30 @@ task("transferEnrichment", "Transfer an Enrichment from 'deployer' to address")
     const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
     const enrichments = await Enrichments.attach(deployed.address);
     console.log(args)
-    const result = await enrichments.safeTransferFrom(deployer, args.to, Number(args.id), Number(args.amount), ethers.utils.toUtf8Bytes(""), { 
+    const result = await enrichments.safeTransferFrom(deployer, args.to, Number(args.id), Number(args.amount), ethers.utils.toUtf8Bytes(""), {
       gasLimit: 200000,
       from: deployer
     }).then(tx => tx.wait());
     console.log(JSON.stringify(result, null, 2));
-});
+  });
 
 task("mintKeys", "Mints a FungyProof Key")
-.addPositionalParam("to", "Mint to address")
-.addPositionalParam("amount", "The Key NFTs total supply")
-.addPositionalParam("uri", "The Key NFTs URI")
-.setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
-  const { deploy } = deployments;
-  const { deployer } = await getNamedAccounts();
-
-  // Deploy NFT
-  await deploy("FungyProofKeys", {
-    from: deployer,
-    log: true
-  })
-  const Keys = await ethers.getContract("FungyProofKeys", deployer);
-
-  // Mint a FungyProof Keys
-  const result = await Keys.mint(args.to,  Number(args.amount), args.uri, { gasLimit: 200000, from: deployer }).then(tx => tx.wait());
-  console.log(JSON.stringify(result, null, 2));
-});
-
-task("enrichNft", "Enrich an NFT")
-  .addPositionalParam("address", "Contract address")
-  .addPositionalParam("tokenId", "Token ID")
-  .addPositionalParam("enrichmentId", "The Enrichments ID")
-  .addPositionalParam("uri", "The Enrichment URI")
+  .addPositionalParam("to", "Mint to address")
+  .addPositionalParam("amount", "The Key NFTs total supply")
+  .addPositionalParam("uri", "The Key NFTs URI")
   .setAction(async (args, { ethers, getNamedAccounts, deployments }) => {
     const { deploy } = deployments;
     const { deployer } = await getNamedAccounts();
 
-    const deployed = await deployments.get("FungyProofEnrichments", deployer);
-    const Enrichments = await ethers.getContractFactory('FungyProofEnrichments');
-    const enrichments = await Enrichments.attach(deployed.address);
+    // Deploy NFT
+    await deploy("FungyProofKeys", {
+      from: deployer,
+      log: true
+    })
+    const Keys = await ethers.getContract("FungyProofKeys", deployer);
 
-    const result = await enrichments.enrich(args.address, args.tokenId, args.enrichmentId, args.uri).then(tx => tx.wait());
+    // Mint a FungyProof Keys
+    const result = await Keys.mint(args.to, Number(args.amount), args.uri, { gasLimit: 200000, from: deployer }).then(tx => tx.wait());
     console.log(JSON.stringify(result, null, 2));
   });
 
@@ -435,9 +495,9 @@ task("send", "Send ETH")
     return send(fromSigner, txRequest);
   });
 
-  
 task("setupTestAccount", "Setup a test account")
   .addPositionalParam("account", "The address to setup")
+  .addPositionalParam("nftId", "Starting NFT ID")
   .setAction(async (args, { ethers, run, getNamedAccounts, deployments }) => {
     const { deploy } = deployments;
     const { deployer } = await getNamedAccounts();
@@ -453,14 +513,22 @@ task("setupTestAccount", "Setup a test account")
     await run('mintNft', {
       to: args.account,
       uri: 'https://arweave.net/M_dGSWzQ-MbkJawoaGl2s8gTMvm96LTUPQrufvzF6ug/rocket-nft.json',
+      id: Number(args.nftId)
+    })
+
+    // Mint a test nft
+    await run('mintNft', {
+      to: args.account,
+      uri: 'ipfs://ipfs/QmR5pxkm3NGa9QQCFNgxfxgSZbFSbj5Uee98i38YJg9SKg',
+      id: Number(args.nftId) + 1
     })
 
     // Transfer a case to address
-    // await run('transferEnrichment', {
-    //   to: args.account,
-    //   id: '1',
-    //   amount: '1'
-    // })
+    await run('transferEnrichment', {
+      to: args.account,
+      id: '1',
+      amount: '1'
+    })
   });
 
 /**
@@ -479,7 +547,7 @@ task("proxyControl", "Manage proxy")
     const deployed = await deployments.get('FungyProofEnrichments', deployer);
     const proxy = await deployments.get("DefaultProxyAdmin", adminSigner);
     const proxyContract = await ethers.getContractAt(proxy.abi, proxy.address, adminSigner);
-    
+
     // Admin of FungyProofEnrichments_Proxy 0x0B306BF915C4d645ff596e518fAf3F9669b97016 (DefaultProxyAdmin)
     // Owner of DefaultProxyAdmin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (address 2)
 
@@ -534,10 +602,10 @@ task("fundedwallet", "Create a wallet (pk) link and fund it with deployer?")
       deployerWallet = deployerWallet.connect(ethers.provider);
       console.log(
         "💵 Sending " +
-          amount +
-          " ETH to " +
-          randomWallet.address +
-          " using deployer account"
+        amount +
+        " ETH to " +
+        randomWallet.address +
+        " using deployer account"
       );
       let sendresult = await deployerWallet.sendTransaction(tx);
       console.log("\n" + url + "/pk#" + privateKey + "\n");
@@ -545,10 +613,10 @@ task("fundedwallet", "Create a wallet (pk) link and fund it with deployer?")
     } else {
       console.log(
         "💵 Sending " +
-          amount +
-          " ETH to " +
-          randomWallet.address +
-          " using local node"
+        amount +
+        " ETH to " +
+        randomWallet.address +
+        " using local node"
       );
       console.log("\n" + url + "/pk#" + privateKey + "\n");
       return send(ethers.provider.getSigner(), tx);
@@ -578,8 +646,8 @@ task(
       "0x" + EthUtil.privateToAddress(wallet._privKey).toString("hex");
     console.log(
       "🔐 Account Generated as " +
-        address +
-        " and set as mnemonic in packages/hardhat"
+      address +
+      " and set as mnemonic in packages/hardhat"
     );
     console.log(
       "💬 Use 'yarn run account' to get more information about the deployment account."
@@ -638,12 +706,12 @@ task(
 
     console.log(
       "⛏  Account Mined as " +
-        address +
-        " and set as mnemonic in packages/hardhat"
+      address +
+      " and set as mnemonic in packages/hardhat"
     );
     console.log(
       "📜 This will create the first contract: " +
-        chalk.magenta("0x" + contract_address)
+      chalk.magenta("0x" + contract_address)
     );
     console.log(
       "💬 Use 'yarn run account' to get more information about the deployment account."

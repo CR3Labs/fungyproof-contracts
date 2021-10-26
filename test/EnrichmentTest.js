@@ -1,4 +1,4 @@
-const { ethers, deployments, getNamedAccounts } = require('hardhat');
+const { ethers, upgrades, deployments, getNamedAccounts } = require('hardhat');
 const { use, expect } = require('chai');
 const { solidity } = require('ethereum-waffle');
 const { mint721, mint721TestFunc } = require('./utils');
@@ -8,6 +8,7 @@ use(solidity);
 describe('FungyProofEnrichments', async function () {
   const { deployer, admin, tester } = await getNamedAccounts()
   const testSigner = ethers.provider.getSigner(tester);
+  const deploySigner = ethers.provider.getSigner(deployer);
 
   let enrichment;
   let enrichmentImplAddr;
@@ -43,7 +44,35 @@ describe('FungyProofEnrichments', async function () {
       expect(d).to.be.equal(deployer);
     });
 
-    // TODO test Proxy Upgrade
+    // NOTE: hardhat-deploy handles this automatically
+    // We tested this by adding the following function to the 
+    // FungyProofEnrichmentsBase and redeploying:
+    //
+    // function updated() public view virtual returns (uint256)  {
+    //   return 123;
+    // }
+    it.skip('Should properly upgrade the contract', async () => {
+      const val = await enrichment.updated();
+      expect(val.toString()).to.equal('123');
+    });
+
+    it('Should properly implement ERC165', async () => {
+      const ERC1155 = '0xd9b67a26';
+      const ERC1155_METADATA_URI = '0x0e89341c';
+
+      const erc1155 = await enrichment.supportsInterface(ERC1155);
+      const metadata = await enrichment.supportsInterface(ERC1155_METADATA_URI);
+      
+      expect(erc1155).to.be.true
+      expect(metadata).to.be.true
+    });
+
+    it('Should set the payee', async () => {
+      // NOTE: here we can set it to a gnosis safe
+      await enrichment.setPayee(deployer).then(t => t.wait());
+      const payee = await enrichment.payee();
+      expect(payee).to.be.equal(deployer);
+    });
 
     it('Should mint an enrichment', async () => {
       // mint an enrichment
@@ -110,11 +139,6 @@ describe('FungyProofEnrichments', async function () {
 
   describe('Purchase', function () {
     it('Should allow purchasing an enrichment', async () => {
-      // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
-      expect(ownerOf).to.be.equal(tester);
-
       // mint an enrichment
       await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
         from: deployer
@@ -131,11 +155,6 @@ describe('FungyProofEnrichments', async function () {
     });
 
     it('Should fail to purchase with wrong payment', async () => {
-      // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
-      expect(ownerOf).to.be.equal(tester);
-
       // mint an enrichment
       await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
         from: deployer
@@ -143,37 +162,37 @@ describe('FungyProofEnrichments', async function () {
 
       // purchase enrichment
       try {
-        const purchase = await enrichment.connect(testSigner).purchase(1, address, 1, 'ceramic://testenrichment1', {
+        const purchase = await enrichment.connect(testSigner).purchase(1, {
           value: ethers.utils.parseEther('0.01')
         }).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: wrong payment value'));
+        expect(~err.message.indexOf('FPNFE: wrong payment value'));
       }
     });
 
     it('Should fail to purchase if enrichment is not available', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // purchase enrichment
       try {
-        const purchase = await enrichment.purchase(999, address, 1, 'ceramic://testenrichment1', {
+        const purchase = await enrichment.purchase(999, {
           value: ethers.utils.parseEther('0.01')
         }).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: enrichment is not available for purchase'));
+        expect(~err.message.indexOf('FPNFE: purchase not available'));
       }
     });
   });
 
   describe('PurchaseAndBind', function () {
 
-    it('Should allow purchasing an enrichment', async () => {
+    it('Should allow purchasing and binding an enrichment', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint an enrichment
@@ -182,7 +201,7 @@ describe('FungyProofEnrichments', async function () {
       }).then(t => t.wait());
 
       // purchase enrichment
-      const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, 1, 'ceramic://testenrichment1', {
+      const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
         value: ethers.utils.parseEther('0.02')
       }).then(t => t.wait());
 
@@ -190,17 +209,17 @@ describe('FungyProofEnrichments', async function () {
       const testerBal = await enrichment.balanceOf(tester, 1);
       expect(testerBal.toNumber()).to.be.equal(0);
       // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(enrichmentBal.toNumber()).to.be.equal(1);
       // expect enrichmentURI to be set
-      const enrichmentURI = await enrichment.enrichmentURI(address, 1, 1);
+      const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
     });
 
     it('Should fail to purchase with wrong payment', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint an enrichment
@@ -210,18 +229,18 @@ describe('FungyProofEnrichments', async function () {
 
       // purchase enrichment
       try {
-        const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, 1, 'ceramic://testenrichment1', {
+        const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
           value: ethers.utils.parseEther('0.01')
         }).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: wrong payment value'));
+        expect(~err.message.indexOf('FPNFE: wrong payment value'));
       }
     });
 
     it('Should fail to purchase if not owner', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint an enrichment
@@ -231,28 +250,58 @@ describe('FungyProofEnrichments', async function () {
 
       // purchase enrichment
       try {
-        const purchase = await enrichment.purchaseAndBind(1, address, 1, 'ceramic://testenrichment1', {
+        const purchase = await enrichment.purchaseAndBind(1, address, 'nottheid', 'ceramic://testenrichment1', {
           value: ethers.utils.parseEther('0.01')
         }).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: sender does not own token'));
+        expect(~err.message.indexOf('FPNFE: not token owner'));
       }
     });
 
     it('Should fail to purchase if enrichment is not available', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // purchase enrichment
       try {
-        const purchase = await enrichment.purchaseAndBind(999, address, 1, 'ceramic://testenrichment1', {
+        const purchase = await enrichment.purchaseAndBind(999, address, id, 'ceramic://testenrichment1', {
           value: ethers.utils.parseEther('0.01')
         }).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: enrichment is not available for purchase'));
+        expect(~err.message.indexOf('FPNFE: purchase not available'));
       }
+    });
+
+    it('Should allow withdrawing funds from PullPayment', async () => {
+       // mint an NFT
+       const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+       const ownerOf = await nft.ownerOf(id);
+       expect(ownerOf).to.be.equal(tester);
+ 
+       // mint an enrichment
+       await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
+         from: deployer
+       }).then(t => t.wait());
+ 
+       // purchase enrichment
+       await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
+         value: ethers.utils.parseEther('0.02'),
+         from: tester
+       })
+
+       const payment = await enrichment.payments(admin);
+       const beforeBal = await deploySigner.provider.getBalance(admin);
+       const receipt = await enrichment.withdrawPayments(admin).then(t => t.wait());
+       const afterBal = await deploySigner.provider.getBalance(admin);
+
+       const p = ethers.utils.formatEther(payment);
+       const gas = ethers.utils.formatEther(receipt.gasUsed);
+       const total = ethers.utils.formatEther(afterBal.sub(beforeBal));
+      
+       expect(p).to.be.equal('0.02');
+       expect(total).to.be.equal('0.02');
     });
 
   })
@@ -261,8 +310,8 @@ describe('FungyProofEnrichments', async function () {
 
     it('Should allow binding with a purchased enrichment', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint enrichment
@@ -275,23 +324,23 @@ describe('FungyProofEnrichments', async function () {
       expect(testerBal.toNumber()).to.be.equal(1);
 
       // bind
-      await enrichment.connect(testSigner).bind(address, 1, 1, 'ceramic://testenrichment1').then(t => t.wait());
+      const receipt = await enrichment.connect(testSigner).bind(address, id, 1, 'ceramic://testenrichment1').then(t => t.wait());
 
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
       // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(enrichmentBal.toNumber()).to.be.equal(1);
       // expect enrichmentURI to be set
-      const enrichmentURI = await enrichment.enrichmentURI(address, 1, 1);
+      const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
     });
 
     it('Should allow unbinding a previously bound enrichment', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint non-permanent enrichment
@@ -308,34 +357,34 @@ describe('FungyProofEnrichments', async function () {
       expect(!isPermanent);
 
       // --- bind --- //
-      await enrichment.connect(testSigner).bind(address, 1, 1, 'ceramic://testenrichment1').then(t => t.wait());
+      await enrichment.connect(testSigner).bind(address, id, 1, 'ceramic://testenrichment1').then(t => t.wait());
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
       // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(enrichmentBal.toNumber()).to.be.equal(1);
       // expect enrichmentURI to be set
-      const enrichmentURI = await enrichment.enrichmentURI(address, 1, 1);
+      const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
 
       // --- unbind --- //
-      await enrichment.connect(testSigner).unbind(address, 1, 1).then(t => t.wait());
+      await enrichment.connect(testSigner).unbind(address, id, 1).then(t => t.wait());
       // expect balance
       const uTesterBal = await enrichment.balanceOf(tester, 1);
       expect(uTesterBal.toNumber()).to.be.equal(1);
       // expect nft to not hve bal
-      const uEnrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const uEnrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(uEnrichmentBal.toNumber()).to.be.equal(0);
       // expect enrichmentURI to be empty
-      const uEnrichmentURI = await enrichment.enrichmentURI(address, 1, 1);
+      const uEnrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(uEnrichmentURI).to.be.empty;
     });
 
     it('Should not allow unbinding a previously bound permanent enrichment', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint permanent enrichment
@@ -348,30 +397,30 @@ describe('FungyProofEnrichments', async function () {
       expect(testerBal.toNumber()).to.be.equal(1);
 
       // --- bind --- //
-      await enrichment.connect(testSigner).bind(address, 1, 1, 'ceramic://testenrichment1').then(t => t.wait());
+      await enrichment.connect(testSigner).bind(address, id, 1, 'ceramic://testenrichment1').then(t => t.wait());
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
       // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(enrichmentBal.toNumber()).to.be.equal(1);
       // expect enrichmentURI to be set
-      const enrichmentURI = await enrichment.enrichmentURI(address, 1, 1);
+      const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
 
       // --- unbind --- //
       try {
-        await enrichment.connect(testSigner).unbind(address, 1, 1).then(t => t.wait());
+        await enrichment.connect(testSigner).unbind(address, id, 1).then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: enrichment cannot be unbound'));
+        expect(~err.message.indexOf('FPNFE: cant be unbound'));
       }
 
     });
 
     it('Should fail if enrichment bal is < 1', async () => {
       // mint an NFT
-      const { nft, address } = await mint721(deployer, tester, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(tester);
 
       // mint enrichment to deployer
@@ -381,17 +430,17 @@ describe('FungyProofEnrichments', async function () {
 
       // bind
       try {
-        await enrichment.connect(testSigner).bind(address, 1, 1, 'ceramic://testenrichment1').then(t => t.wait());
+        await enrichment.connect(testSigner).bind(address, id, 1, 'ceramic://testenrichment1').then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: sender does not own enrichment'));
+        expect(~err.message.indexOf('FPNFE: not enrichment owner'));
       }
 
     });
 
     it('Should fail if msg.sender != nft owner', async () => {
       // mint an NFT to deployer
-      const { nft, address } = await mint721(deployer, deployer, 'ipfs://testtoken');
-      const ownerOf = await nft.ownerOf(1);
+      const { nft, address, id } = await mint721(deployer, deployer, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
       expect(ownerOf).to.be.equal(deployer);
 
       // mint enrichment to tester
@@ -401,9 +450,9 @@ describe('FungyProofEnrichments', async function () {
 
       // bind
       try {
-        await enrichment.connect(testSigner).bind(address, 1, 1, 'ceramic://testenrichment1').then(t => t.wait());
+        const receipt = await enrichment.connect(testSigner).bind(address, id, 1, 'ceramic://testenrichment1').then(t => t.wait());
       } catch (err) {
-        expect(~err.message.indexOf('FungyProofEnrichments: sender does not own token'));
+        expect(~err.message.indexOf('FPNFE: sender does not own token'));
       }
     });
 
@@ -413,8 +462,8 @@ describe('FungyProofEnrichments', async function () {
 
     it('Should allow owner to set ownerOfFunction', async () => {
       // mint an NFT to deployer
-      const { nft, address } = await mint721TestFunc(deployer, tester, 'ipfs://testtoken');
-      const idToAddress = await nft.idToAddress(1);
+      const { nft, address, id } = await mint721TestFunc(deployer, tester, 'ipfs://testtoken');
+      const idToAddress = await nft.idToAddress(id);
       expect(idToAddress).to.be.equal(tester);
 
       // set a custom ownerOf function
@@ -428,12 +477,12 @@ describe('FungyProofEnrichments', async function () {
       }).then(t => t.wait());
 
       // purchase enrichment
-      const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, 1, 'ceramic://testenrichment1', {
+      const purchase = await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
         value: ethers.utils.parseEther('0.01')
       }).then(t => t.wait());
 
       // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, 1, 1);
+      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
       expect(enrichmentBal.toNumber()).to.be.equal(1);
     });
 

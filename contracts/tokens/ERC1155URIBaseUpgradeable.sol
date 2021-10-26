@@ -11,33 +11,55 @@ import "@openzeppelin/contracts-upgradeable/security/PullPaymentUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
 
-contract ERC1155URIBaseUpgradeable is ERC1155HolderUpgradeable, ERC1155SupplyUpgradeable, PullPaymentUpgradeable, OwnableUpgradeable {
-    using StringsUpgradeable for uint;
+contract ERC1155URIBaseUpgradeable is
+    ERC1155HolderUpgradeable,
+    ERC1155SupplyUpgradeable,
+    PullPaymentUpgradeable,
+    OwnableUpgradeable
+{
+    using StringsUpgradeable for uint256;
 
     // Optional mapping for token URIs
-    mapping (uint256 => string) private _tokenURIs;
+    mapping(uint256 => string) private _tokenURIs;
 
     // Base URI
     string private _baseURI;
 
-    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC1155ReceiverUpgradeable, ERC1155Upgradeable) returns (bool) {
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(ERC1155ReceiverUpgradeable, ERC1155Upgradeable)
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
 
     /**
-    * @dev Returns the base URI set via {_setBaseURI}. This will be
-    * automatically added as a prefix in {tokenURI} to each token's URI, or
-    * to the token ID if no specific URI is set for that token ID.
-    */
+     * @dev Returns the base URI set via {_setBaseURI}. This will be
+     * automatically added as a prefix in {tokenURI} to each token's URI, or
+     * to the token ID if no specific URI is set for that token ID.
+     */
     function baseURI() public view virtual returns (string memory) {
         return _baseURI;
     }
 
-    function uri(uint id) public view override virtual returns (string memory) {
+    function uri(uint256 id)
+        public
+        view
+        virtual
+        override
+        returns (string memory)
+    {
         return _tokenURI(id);
     }
 
-    function _tokenURI(uint256 tokenId) internal view virtual returns (string memory) {
+    function _tokenURI(uint256 tokenId)
+        internal
+        view
+        virtual
+        returns (string memory)
+    {
         string memory _uri = _tokenURIs[tokenId];
         string memory base = baseURI();
 
@@ -60,7 +82,10 @@ contract ERC1155URIBaseUpgradeable is ERC1155HolderUpgradeable, ERC1155SupplyUpg
      *
      * - `tokenId` must exist.
      */
-    function _setTokenURI(uint256 tokenId, string memory _uri) internal virtual {
+    function _setTokenURI(uint256 tokenId, string memory _uri)
+        internal
+        virtual
+    {
         _tokenURIs[tokenId] = _uri;
         emit URI(_tokenURI(tokenId), tokenId);
     }

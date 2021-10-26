@@ -8,13 +8,15 @@ const { ethers, deployments, getNamedAccounts } = require('hardhat');
  * @returns 
  */
 async function mint721(deployer, to, uri) {
+    const id = Math.floor(Math.random() * 100) ** 4
     await deployments.fixture(['ERC721FungyProof']);
     const deployed = await deployments.get('ERC721FungyProof');
     const nft = await ethers.getContract('ERC721FungyProof', deployer);
-    await nft.mint(to, uri);
+    await nft.mint(to, uri, id);
     return {
         address: deployed.address,
-        nft
+        nft,
+        id
     };
 }
 
@@ -26,13 +28,15 @@ async function mint721(deployer, to, uri) {
  * @returns 
  */
  async function mint721TestFunc(deployer, to, uri) {
+    const id = Math.floor(Math.random() * 100) ** 4
     await deployments.fixture(['ERC721FungyProofTestFunc']);
     const deployed = await deployments.get('ERC721FungyProofTestFunc');
     const nft = await ethers.getContract('ERC721FungyProofTestFunc', deployer);
-    await nft.mint(to, uri);
+    await nft.mint(to, uri, id);
     return {
         address: deployed.address,
-        nft
+        nft,
+        id
     };
 }
 

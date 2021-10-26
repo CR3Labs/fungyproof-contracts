@@ -24,10 +24,9 @@ module.exports = async ({ getNamedAccounts, deployments, defaultNetwork }) => {
 
   // NOTE: interacting with the contract must be done through a factory
   // via attaching to the proxy address (and passing in the ABI if from the DAPP):
-  // const deployed = await deployments.get("FungyProofEnrichments", deployer);
-  // const Enrichment = await ethers.getContractFactory('FungyProofEnrichments');
-  // const attached = await Enrichment.attach(deployed.address);
-  // const name = await attached.name({ gasLimit: 300000, from: deployer });
-  // console.log(name, '::', deployed.address)
+  const deployed = await deployments.get("FungyProofEnrichments", deployer);
+  const Enrichment = await ethers.getContractFactory('FungyProofEnrichments');
+  const attached = await Enrichment.attach(deployed.address);
+  await attached.setPayee(admin).then(t => t.wait());
 };
 module.exports.tags = ["Enrichment"];

@@ -6,28 +6,39 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
 
 abstract contract ERC1155Base is ERC1155Supply {
-    using Strings for uint;
+    using Strings for uint256;
 
     // Optional mapping for token URIs
-    mapping (uint256 => string) private _tokenURIs;
+    mapping(uint256 => string) private _tokenURIs;
 
     // Base URI
     string private _baseURI;
 
     /**
-    * @dev Returns the base URI set via {_setBaseURI}. This will be
-    * automatically added as a prefix in {tokenURI} to each token's URI, or
-    * to the token ID if no specific URI is set for that token ID.
-    */
+     * @dev Returns the base URI set via {_setBaseURI}. This will be
+     * automatically added as a prefix in {tokenURI} to each token's URI, or
+     * to the token ID if no specific URI is set for that token ID.
+     */
     function baseURI() public view virtual returns (string memory) {
         return _baseURI;
     }
 
-    function uri(uint id) public view override virtual returns (string memory) {
+    function uri(uint256 id)
+        public
+        view
+        virtual
+        override
+        returns (string memory)
+    {
         return _tokenURI(id);
     }
 
-    function _tokenURI(uint256 tokenId) internal view virtual returns (string memory) {
+    function _tokenURI(uint256 tokenId)
+        internal
+        view
+        virtual
+        returns (string memory)
+    {
         string memory _uri = _tokenURIs[tokenId];
         string memory base = baseURI();
 
@@ -50,7 +61,10 @@ abstract contract ERC1155Base is ERC1155Supply {
      *
      * - `tokenId` must exist.
      */
-    function _setTokenURI(uint256 tokenId, string memory _uri) internal virtual {
+    function _setTokenURI(uint256 tokenId, string memory _uri)
+        internal
+        virtual
+    {
         _tokenURIs[tokenId] = _uri;
         emit URI(_tokenURI(tokenId), tokenId);
     }
