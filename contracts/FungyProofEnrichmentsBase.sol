@@ -14,11 +14,11 @@ import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol
  * Enrichments were designed to enable attaching functionality to existing NFTs without affecting the original NFT.
  *
  * Requirements:
- *  - Enrichments cannot be transfered once they have been `bound` to an NFT
+ *  - Enrichments cannot be transferred once they have been `bound` to an NFT
  *  - Enrichments can be `unbound` if the `isPermanent` flag is set to false on mint
  *  - The `bind` method must be called by the owner (or approved) of the token being enriched
  *  - The underlying 1155 implements several additional extensions, specifically:
- *     - OpenZeppelin ERC1155Receiver: ability to set the contract as the owner of it's underlying 1155 tokens
+ *     - OpenZeppelin ERC1155Receiver: ability to set the contract as the owner of its underlying 1155 tokens
  *     - OpenZeppelin ERC155Supply: keep track of token supply to enable minting semi and non-fungible tokens
  *     - ERC1155URI: add tokenURI similar to ERC721 to support setting URI on a per-token basis
  *     - OpenZeppelin: pull payment for genesis enrichment sales and to address security concerns
@@ -50,7 +50,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // Payee address
     address private _payee;
 
-    // Holds current enrichmentId restricted to 96bits to support enrichment keys
+    // To support enrichment keys, restricts current enrichmentId to 96bits
     uint96 private _enrichmentId;
 
     // [   1 bit   |  255 bits ]
@@ -68,8 +68,8 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // [ address  |    ID    ]
     // |MSB               LSB|
     //
-    // Mapping of enrichmentKey -> tokenId -> enrichment balance
-    mapping(bytes32 => mapping(uint256 => uint256)) private _enrichmentBalances;
+    // Mapping of enrichmentKey -> tokenId -> bound flag
+    mapping(bytes32 => mapping(uint256 => bool)) private _enrichmentBindings;
 
     // Mapping of enrichmentKey -> tokenId -> enrichment URI
     mapping(bytes32 => mapping(uint256 => string)) private _enrichmentURIs;
@@ -210,7 +210,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         string memory uri
     ) public virtual {
         require(
-            enrichmentBalanceOf(contractAddress, tokenId, enrichmentId) == 0,
+            !isBound(contractAddress, tokenId, enrichmentId),
             "FPNFE: token has enrichment"
         );
 
@@ -222,7 +222,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         );
 
         require(
-            _ownsToken(contractAddress, tokenId, operator),
+            ownsToken(contractAddress, tokenId, operator),
             "FPNFE: not token owner"
         );
 
@@ -236,7 +236,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         );
 
         _enrichmentURIs[enrichmentKey][tokenId] = uri;
-        _enrichmentBalances[enrichmentKey][tokenId] += 1;
+        _enrichmentBindings[enrichmentKey][tokenId] = true;
 
         emit BindEnrichment(
             operator,
@@ -249,7 +249,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
 
     /**
      * @dev Unbind an enrichment from a token. Transfers enrichment back to nft owner, unsets enrichment URI
-     * for this binding and decrements the tokens enrichment balance.
+     * and sets bound flag to false.
      *
      * Requirements:
      * - enrichment must be bound
@@ -267,25 +267,24 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         );
 
         require(
-            _enrichmentBalances[enrichmentKey][tokenId] >= 0,
+            _enrichmentBindings[enrichmentKey][tokenId],
             "FPNFE: not bound"
         );
         require(
-            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET) !=
-                true,
+            !_enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET),
             "FPNFE: can't be unbound"
         );
 
         address operator = _msgSender();
 
         require(
-            _ownsToken(contractAddress, tokenId, operator),
+            ownsToken(contractAddress, tokenId, operator),
             "FPNFE: sender does not own token"
         );
 
         // unbind the enrichment
         _enrichmentURIs[enrichmentKey][tokenId] = "";
-        _enrichmentBalances[enrichmentKey][tokenId] -= 1;
+        _enrichmentBindings[enrichmentKey][tokenId] = false;
 
         // transfer enrichment back to owner
         _safeTransferFrom(address(this), operator, enrichmentId, 1, "");
@@ -368,23 +367,51 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         virtual
         returns (bool)
     {
-        return
-            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET);
+        return _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET);
     }
 
     /**
-     * @dev Return a tokens balance of an enrichment
+     * @dev Return whether or not an enrichment is bound to a token
      */
-    function enrichmentBalanceOf(
+    function isBound(
         address contractAddress,
         uint256 tokenId,
         uint256 enrichmentId
-    ) public view virtual returns (uint256) {
+    ) public view virtual returns (bool) {
         bytes32 enrichmentKey = _encodeEnrichmentKey(
             contractAddress,
             uint96(enrichmentId)
         );
-        return _enrichmentBalances[enrichmentKey][tokenId];
+        return _enrichmentBindings[enrichmentKey][tokenId];
+    }
+
+    /**
+     * @dev Check if an NFT is owned by msg.sender. Security vulnerabilities of this function are mitigated
+     * by using a `staticcall` to the external token contract.
+     *
+     * Requirements:
+     * - `contractAddress` cannot be the zero address.
+     * - must be a successful staticcall
+     */
+    function ownsToken(
+        address contractAddress,
+        uint256 tokenId,
+        address owner
+    ) public view virtual returns (bool) {
+        require(
+            contractAddress != address(0),
+            "FPNFE: invalid contract address"
+        );
+        string memory func = (bytes(_contractOwnerOfFunctions[contractAddress])
+            .length != 0)
+            ? _contractOwnerOfFunctions[contractAddress]
+            : "ownerOf(uint256)";
+        bytes memory payload = abi.encodeWithSignature(func, tokenId);
+        (bool success, bytes memory returnData) = contractAddress.staticcall(
+            payload
+        );
+        require(success, "FPNFE: can't determine owner");
+        return (_bytesToAddress(returnData) == owner);
     }
 
     /**
@@ -423,35 +450,6 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         _enrichmentState[enrichmentId] = enrichmentState
             .insertUint255(price, _PRICE_OFFSET)
             .insertBool(permanent, _PERMANENT_FLAG_OFFSET);
-    }
-
-    /**
-     * @dev Check if an NFT is owned by msg.sender. Security vulnerabilities of this function are reduced/mitigated
-     * by using a `staticcall` to the external token contract.
-     *
-     * Requirements:
-     * - `contractAddress` cannot be the zero address.
-     * - must be a successful staticcall
-     */
-    function _ownsToken(
-        address contractAddress,
-        uint256 tokenId,
-        address owner
-    ) private view returns (bool) {
-        require(
-            contractAddress != address(0),
-            "FPNFE: invalid contract address"
-        );
-        string memory func = (bytes(_contractOwnerOfFunctions[contractAddress])
-            .length != 0)
-            ? _contractOwnerOfFunctions[contractAddress]
-            : "ownerOf(uint256)";
-        bytes memory payload = abi.encodeWithSignature(func, tokenId);
-        (bool success, bytes memory returnData) = contractAddress.staticcall(
-            payload
-        );
-        require(success, "FPNFE: can't determine owner");
-        return (_bytesToAddress(returnData) == owner);
     }
 
     /**
