@@ -208,9 +208,9 @@ describe('FungyProofEnrichments', async function () {
       // expect burned
       const testerBal = await enrichment.balanceOf(tester, 1);
       expect(testerBal.toNumber()).to.be.equal(0);
-      // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(enrichmentBal.toNumber()).to.be.equal(1);
+      // expect enrichment to be bound to nft
+      const isBound = await enrichment.isBound(address, id, 1);
+      expect(isBound);
       // expect enrichmentURI to be set
       const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
@@ -329,9 +329,9 @@ describe('FungyProofEnrichments', async function () {
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
-      // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(enrichmentBal.toNumber()).to.be.equal(1);
+      // expect enrichment to be bound to nft
+      const isBound = await enrichment.isBound(address, id, 1);
+      expect(isBound);
       // expect enrichmentURI to be set
       const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
@@ -361,9 +361,9 @@ describe('FungyProofEnrichments', async function () {
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
-      // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(enrichmentBal.toNumber()).to.be.equal(1);
+      // expect enrichment to be bound to nft
+      const isBound = await enrichment.isBound(address, id, 1);
+      expect(isBound);
       // expect enrichmentURI to be set
       const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
@@ -373,9 +373,9 @@ describe('FungyProofEnrichments', async function () {
       // expect balance
       const uTesterBal = await enrichment.balanceOf(tester, 1);
       expect(uTesterBal.toNumber()).to.be.equal(1);
-      // expect nft to not hve bal
-      const uEnrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(uEnrichmentBal.toNumber()).to.be.equal(0);
+      // expect nft to not be bound
+      const boundAfterUnbind = await enrichment.isBound(address, id, 1);
+      expect(boundAfterUnbind).to.be.false;
       // expect enrichmentURI to be empty
       const uEnrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(uEnrichmentURI).to.be.empty;
@@ -401,9 +401,9 @@ describe('FungyProofEnrichments', async function () {
       // expect burned
       const newTesterBal = await enrichment.balanceOf(tester, 1);
       expect(newTesterBal.toNumber()).to.be.equal(0);
-      // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(enrichmentBal.toNumber()).to.be.equal(1);
+      // expect enrichment to be bound to nft
+      const isBound = await enrichment.isBound(address, id, 1);
+      expect(isBound);
       // expect enrichmentURI to be set
       const enrichmentURI = await enrichment.enrichmentURI(address, id, 1);
       expect(enrichmentURI).to.be.equal('ceramic://testenrichment1');
@@ -481,9 +481,9 @@ describe('FungyProofEnrichments', async function () {
         value: ethers.utils.parseEther('0.01')
       }).then(t => t.wait());
 
-      // expect nft to have bal
-      const enrichmentBal = await enrichment.enrichmentBalanceOf(address, id, 1);
-      expect(enrichmentBal.toNumber()).to.be.equal(1);
+      // expect enrichment to be bound to nft
+      const isBound = await enrichment.isBound(address, id, 1);
+      expect(isBound);
     });
 
   });
