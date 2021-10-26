@@ -329,7 +329,7 @@ task("mintNft", "Mints an NFT")
     console.log('nft:', NFT.address)
 
     // Mint a FungyProof NFT
-    const result = await NFT.mint(args.to, args.uri, { gasLimit: 200000, from: deployer }).then(tx => tx.wait());
+    const result = await NFT.mint(args.to, args.uri, args.id, { gasLimit: 200000, from: deployer }).then(tx => tx.wait());
     console.log(JSON.stringify(result, null, 2));
   });
 
@@ -513,14 +513,14 @@ task("setupTestAccount", "Setup a test account")
     await run('mintNft', {
       to: args.account,
       uri: 'https://arweave.net/M_dGSWzQ-MbkJawoaGl2s8gTMvm96LTUPQrufvzF6ug/rocket-nft.json',
-      id: Number(args.nftId)
+      id: String(args.nftId)
     })
 
     // Mint a test nft
     await run('mintNft', {
       to: args.account,
       uri: 'ipfs://ipfs/QmR5pxkm3NGa9QQCFNgxfxgSZbFSbj5Uee98i38YJg9SKg',
-      id: Number(args.nftId) + 1
+      id: String(Number(args.nftId) + 1)
     })
 
     // Transfer a case to address

@@ -26,8 +26,8 @@ The goal of FungyProof is to improve/modify existing NFTs without affecting thei
 Various scripts exist for simple contract interactions. 
 To execute scripts for different networks include the `--network {localhost|rinkeby|mumbai|mainnet|matic}` parameter.
 
-* `setupEnrichments`: Mint all default FungyProof enrichments. *Available on all networks.
-* `mintEnrichments`: Mint an enrichment. *Available on all networks.
+* `setup`: Mint all default FungyProof enrichments. *Available on all networks.
+* `mintEnrichment`: Mint an enrichment. *Available on all networks.
 * `mintNft`: Mint a test 721 NFT. *Available on `local`, `mumbai`, and `rinkeby` networks.
 * `mintKeys`: Mint FungyProof keys (Ceramic Network controllers). *Only available on `local`, `mumbai`, and `matic` networks.
 * `setupTestAccount`: Set up an address with ETH, a test NFT, and a test Enrichment.

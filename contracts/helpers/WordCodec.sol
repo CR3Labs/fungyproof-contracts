@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: UNLICENSED
 
 pragma solidity 0.8.4;
@@ -45,21 +44,33 @@ library WordCodec {
     /**
      * @dev Decodes and returns a boolean shifted by an offset from a 256 bit word.
      */
-    function decodeBool(bytes32 word, uint256 offset) internal pure returns (bool) {
+    function decodeBool(bytes32 word, uint256 offset)
+        internal
+        pure
+        returns (bool)
+    {
         return (uint256(word >> offset) & _MASK_1) == 1;
     }
 
     /**
      * @dev Decodes and returns a 255 bit unsigned integer shifted by an offset from a 256 bit word.
      */
-    function decodeUint255(bytes32 word, uint256 offset) internal pure returns (uint256) {
+    function decodeUint255(bytes32 word, uint256 offset)
+        internal
+        pure
+        returns (uint256)
+    {
         return uint256(word >> offset) & _MASK_255;
     }
 
     /**
      * @dev Returns the address from an encoded Enrichment Key
      */
-    function getEnrichmentAddress(bytes32 enrichmentKey) internal pure returns (address) {
+    function getEnrichmentAddress(bytes32 enrichmentKey)
+        internal
+        pure
+        returns (address)
+    {
         // 12 byte logical shift left to remove the enrichment id. We don't need to mask,
         // since the logical shift already sets the upper bits to zero.
         return address(uint160(uint256(enrichmentKey)) >> (12 * 8));
@@ -70,8 +81,11 @@ library WordCodec {
      *
      * Assumes the enrichment ID fits in 96 bits.
      */
-    function getEnrichmentId(bytes32 enrichmentKey) internal pure returns (uint256) {
+    function getEnrichmentId(bytes32 enrichmentKey)
+        internal
+        pure
+        returns (uint256)
+    {
         return uint256(enrichmentKey) & _MASK_96;
-
     }
 }

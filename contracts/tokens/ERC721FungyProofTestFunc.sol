@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract ERC721FungyProofTestFunc is ERC721URIStorage, Ownable {
 
-    constructor() ERC721("FungyProofNFT", "FPNFT") {}
+    constructor() ERC721("FungyProofNFT", "FPNFT"){}
 
     function mint(
         address to,

@@ -62,7 +62,7 @@ describe('FungyProofEnrichments', async function () {
 
       const erc1155 = await enrichment.supportsInterface(ERC1155);
       const metadata = await enrichment.supportsInterface(ERC1155_METADATA_URI);
-      
+
       expect(erc1155).to.be.true
       expect(metadata).to.be.true
     });
@@ -88,9 +88,9 @@ describe('FungyProofEnrichments', async function () {
     it('Should batch mint enrichments', async () => {
       // mint an enrichment
       await enrichment.mintBatch(
-        deployer, 
-        [5, 9], 
-        ['ceramic://test1','ceramic://test2'], 
+        deployer,
+        [5, 9],
+        ['ceramic://test1', 'ceramic://test2'],
         [ethers.utils.parseEther('0.02'), ethers.utils.parseEther('0.01')],
         [true, false], {
         from: deployer
@@ -275,33 +275,33 @@ describe('FungyProofEnrichments', async function () {
     });
 
     it('Should allow withdrawing funds from PullPayment', async () => {
-       // mint an NFT
-       const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
-       const ownerOf = await nft.ownerOf(id);
-       expect(ownerOf).to.be.equal(tester);
- 
-       // mint an enrichment
-       await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
-         from: deployer
-       }).then(t => t.wait());
- 
-       // purchase enrichment
-       await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
-         value: ethers.utils.parseEther('0.02'),
-         from: tester
-       })
+      // mint an NFT
+      const { nft, address, id } = await mint721(deployer, tester, 'ipfs://testtoken');
+      const ownerOf = await nft.ownerOf(id);
+      expect(ownerOf).to.be.equal(tester);
 
-       const payment = await enrichment.payments(admin);
-       const beforeBal = await deploySigner.provider.getBalance(admin);
-       const receipt = await enrichment.withdrawPayments(admin).then(t => t.wait());
-       const afterBal = await deploySigner.provider.getBalance(admin);
+      // mint an enrichment
+      await enrichment.mint(deployer, 10, 'ceramic://test', ethers.utils.parseEther('0.02'), {
+        from: deployer
+      }).then(t => t.wait());
 
-       const p = ethers.utils.formatEther(payment);
-       const gas = ethers.utils.formatEther(receipt.gasUsed);
-       const total = ethers.utils.formatEther(afterBal.sub(beforeBal));
-      
-       expect(p).to.be.equal('0.02');
-       expect(total).to.be.equal('0.02');
+      // purchase enrichment
+      await enrichment.connect(testSigner).purchaseAndBind(1, address, id, 'ceramic://testenrichment1', {
+        value: ethers.utils.parseEther('0.02'),
+        from: tester
+      })
+
+      const payment = await enrichment.payments(admin);
+      const beforeBal = await deploySigner.provider.getBalance(admin);
+      const receipt = await enrichment.withdrawPayments(admin).then(t => t.wait());
+      const afterBal = await deploySigner.provider.getBalance(admin);
+
+      const p = ethers.utils.formatEther(payment);
+      const gas = ethers.utils.formatEther(receipt.gasUsed);
+      const total = ethers.utils.formatEther(afterBal.sub(beforeBal));
+
+      expect(p).to.be.equal('0.02');
+      expect(total).to.be.equal('0.02');
     });
 
   })

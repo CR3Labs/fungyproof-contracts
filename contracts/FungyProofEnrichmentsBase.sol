@@ -6,6 +6,23 @@ import "./helpers/WordCodec.sol";
 import "./tokens/ERC1155URIBaseUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
 
+/**
+ * @title FungyProof Enrichments
+ * @author Mike Roth
+ *
+ * @dev A FungyProof enrichment is an extended ERC-1155 where the owner of the token can be another token (721).
+ * Enrichments were designed to enable attaching functionality to existing NFTs without affecting the original NFT.
+ *
+ * Requirements:
+ *  - Enrichments cannot be transfered once they have been `bound` to an NFT
+ *  - Enrichments can be `unbound` if the `isPermanent` flag is set to false on mint
+ *  - The `bind` method must be called by the owner (or approved) of the token being enriched
+ *  - The underlying 1155 implements several additional extensions, specifically:
+ *     - OpenZeppelin ERC1155Receiver: ability to set the contract as the owner of it's underlying 1155 tokens
+ *     - OpenZeppelin ERC155Supply: keep track of token supply to enable minting semi and non-fungible tokens
+ *     - ERC1155URI: add tokenURI similar to ERC721 to support setting URI on a per-token basis
+ *     - OpenZeppelin: pull payment for genesis enrichment sales and to address security concerns
+ */
 contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     using WordCodec for bytes32;
 
@@ -33,16 +50,8 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // Payee address
     address private _payee;
 
-    // Holds current enrichmentId
-    // restricted to 96bits to
-    // support enrichment keys
+    // Holds current enrichmentId restricted to 96bits to support enrichment keys
     uint96 private _enrichmentId;
-
-    // Mapping of enrichmentIds to prices (in wei)
-    mapping(uint256 => uint256) private _prices;
-
-    // Mapping of enrichmentIds to enrichment permanence
-    mapping(uint256 => bool) private _isPermanent;
 
     // [   1 bit   |  255 bits ]
     // [ perm flag |   price   ]
@@ -50,7 +59,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     uint256 private constant _PRICE_OFFSET = 0;
     uint256 private constant _PERMANENT_FLAG_OFFSET = 255;
 
-    // Mapping of enrichmentIds to prices (in wei) and permanence
+    // Mapping of enrichmentIds to enrichment state: prices (in wei) and permanence
     mapping(uint256 => bytes32) private _enrichmentState;
 
     // Define an EnrichmentID as the concatenation of the id and contract address
@@ -69,6 +78,9 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // DEV: only functions which receive a uint256 and return an address are supported
     mapping(address => string) private _contractOwnerOfFunctions;
 
+    /**
+     * @dev proxy unchained initializer
+     */
     function __FungyProofEnrichmentsBase_init_unchained(
         string memory name_,
         string memory symbol_
@@ -81,7 +93,6 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
      * @dev Sets the payee address
      *
      * Requirements:
-     *
      * - `payee` cannot be the zero address.
      */
     function setPayee(address payee_) public virtual onlyOwner {
@@ -99,9 +110,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     /**
      * @dev Sets ownerOf functions.
      *
-     * This is necessary to enable enrichment
-     * support for non-standard NFTs which
-     * are not yet known.
+     * This is necessary to enable enrichment support for non-standard NFTs which are not yet known.
      */
     function setOwnerOfFunction(
         address contractAddress,
@@ -113,8 +122,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     /**
      * @dev Mint a new enrichment token.
      *
-     * Auto increments tokenId, sets the tokenURI
-     * and sets price / permanence flag
+     * Auto increments tokenId, sets the tokenURI and sets price / permanence flag
      *
      * Requirements:
      *
@@ -146,8 +154,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     /**
      * @dev Batch mint enrichments
      *
-     * Auto increments tokenIds, sets tokenURIs
-     * and sets price / permanence flags
+     * Auto increments tokenIds, sets tokenURIs and sets price / permanence flags
      *
      * Requirements:
      *
@@ -188,9 +195,13 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     /**
      * @dev Bind an enrichment to a token
      *
-     * Transfers enrichment to contract,
-     * sets enrichment URI for this binding
-     * and increments the tokens enrichment balance
+     * Transfers enrichment to contract, sets enrichment URI for this binding and increments the tokens enrichment
+     * balance.
+     *
+     * Requirements:
+     * - enrichment must not already be bound (if fungible is false)
+     * - msg.sender must have a positive balance of the enrichment
+     * - msg.sender must own the token receiving the enrichment
      */
     function bind(
         address contractAddress,
@@ -237,14 +248,13 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     }
 
     /**
-     * @dev Unbind an enrichment from a token
-     *
-     * Transfers enrichment back to nft owner,
-     * unsets enrichment URI for this binding
-     * and decrements the tokens enrichment balance
+     * @dev Unbind an enrichment from a token. Transfers enrichment back to nft owner, unsets enrichment URI
+     * for this binding and decrements the tokens enrichment balance.
      *
      * Requirements:
+     * - enrichment must be bound
      * - enrichment can not be flagged as permanent
+     * - sender must own the token with the bound enrichment
      */
     function unbind(
         address contractAddress,
@@ -263,7 +273,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         require(
             _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET) !=
                 true,
-            "FPNFE: cant be unbound"
+            "FPNFE: can't be unbound"
         );
 
         address operator = _msgSender();
@@ -286,20 +296,17 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     /**
      * @dev Purchase an enrichment
      *
-     * If the contract owner address contains
-     * a balance for this enrichmentId, transfer
-     * the enrichment to the sender.
+     * If the contract owner address contains a balance for this enrichmentId, transfer the enrichment to the sender.
      *
-     * This implementation uses a PullPayment strategy
-     * to transfer the exact amount to the PulPayment
-     * contract. Checking the exact balance is fine for
-     * our purposes because all prices will be a fixed
-     * round number set directly by the FP team. Unbindable
-     * enrichments can be traded on open markets
-     * and will not require this purchase functionality.
+     * This implementation uses a PullPayment strategy to transfer the exact amount to the PulPayment contract.
+     * Checking the exact balance is fine for our purposes because all prices will be a fixed round number set directly
+     * by the FP team. Unbindable enrichments can be traded on open markets and will not require this purchase
+     * functionality.
      *
      * Requirements:
-     * - enrichment can not be flagged as permanent
+     * - payee must be set
+     * - contract owner must have a balance of the enrichment
+     * - correct payment value must be sent
      */
     function purchase(uint256 enrichmentId) public payable virtual {
         address operator = _msgSender();
@@ -328,7 +335,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     }
 
     /**
-     * @dev Convenience function to Purchase and Bind
+     * @dev Convenience function to Purchase and Bind in one call
      */
     function purchaseAndBind(
         uint256 enrichmentId,
@@ -419,7 +426,8 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     }
 
     /**
-     * @dev Check if an NFT is owned by msg.sender
+     * @dev Check if an NFT is owned by msg.sender. Security vulnerabilities of this function are reduced/mitigated
+     * by using a `staticcall` to the external token contract.
      *
      * Requirements:
      * - `contractAddress` cannot be the zero address.
@@ -442,7 +450,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         (bool success, bytes memory returnData) = contractAddress.staticcall(
             payload
         );
-        require(success, "FPNFE: cant determine owner");
+        require(success, "FPNFE: can't determine owner");
         return (_bytesToAddress(returnData) == owner);
     }
 
