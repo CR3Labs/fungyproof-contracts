@@ -17,6 +17,8 @@ import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol
  *  - Enrichments cannot be transfered once they have been `bound` to an NFT
  *  - Enrichments can be `unbound` if the `isPermanent` flag is set to false on mint
  *  - The `bind` method must be called by the owner (or approved) of the token being enriched
+ *  - Enrichments can be bound multiple times to the same NFT if they are flagged as `fungible` 
+ *    (each bind will overwrite the `enrichmentURI`)
  *  - The underlying 1155 implements several additional extensions, specifically:
  *     - OpenZeppelin ERC1155Receiver: ability to set the contract as the owner of it's underlying 1155 tokens
  *     - OpenZeppelin ERC155Supply: keep track of token supply to enable minting semi and non-fungible tokens
@@ -53,13 +55,14 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     // Holds current enrichmentId restricted to 96bits to support enrichment keys
     uint96 private _enrichmentId;
 
-    // [   1 bit   |  255 bits ]
-    // [ perm flag |   price   ]
-    // |MSB                 LSB|
+    // [   1 bit   |   1 bit    |  254 bits ]
+    // [ perm flag | fung flag  |   price   ]
+    // |MSB                              LSB|
     uint256 private constant _PRICE_OFFSET = 0;
+    uint256 private constant _FUNGIBLE_FLAG_OFFSET = 254;
     uint256 private constant _PERMANENT_FLAG_OFFSET = 255;
 
-    // Mapping of enrichmentIds to enrichment state: prices (in wei) and permanence
+    // Mapping of enrichmentIds to enrichment state: prices (in wei), fungibility, permanence
     mapping(uint256 => bytes32) private _enrichmentState;
 
     // Define an EnrichmentID as the concatenation of the id and contract address
@@ -135,6 +138,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256 amount,
         string memory uri,
         uint256 price,
+        bool fungible,
         bool permanent
     ) public virtual onlyOwner {
         require(to != address(0), "FPNFE: mint to the zero address");
@@ -147,7 +151,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
             _setTokenURI(newEnrichmentId, uri);
         }
 
-        _setPriceAndPermanence(newEnrichmentId, price, permanent);
+        _setEnrichmentState(newEnrichmentId, price, fungible, permanent);
         _mint(to, newEnrichmentId, amount, "");
     }
 
@@ -166,13 +170,15 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256[] memory amounts,
         string[] memory uris,
         uint256[] memory prices,
+        bool[] memory fungibles,
         bool[] memory permanents
     ) public virtual onlyOwner {
         require(to != address(0), "FPNFE: mint to the zero address");
         require(
             (amounts.length == uris.length &&
                 uris.length == prices.length &&
-                prices.length == permanents.length),
+                prices.length == fungibles.length &&
+                fungibles.length == permanents.length),
             "FPNFE: param length mismatch"
         );
 
@@ -186,7 +192,12 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
                 _setTokenURI(newEnrichmentId, uris[i]);
             }
 
-            _setPriceAndPermanence(newEnrichmentId, prices[i], permanents[i]);
+            _setEnrichmentState(
+                newEnrichmentId,
+                prices[i],
+                fungibles[i],
+                permanents[i]
+            );
         }
 
         _mintBatch(to, ids, amounts, "");
@@ -196,10 +207,12 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
      * @dev Bind an enrichment to a token
      *
      * Transfers enrichment to contract, sets enrichment URI for this binding and increments the tokens enrichment
-     * balance.
+     * balance. Fungible enrichments allow the enrichment URI to be overwritten, enrichments are intended to be
+     * combined with append-only metadata which would require the enrichmentURI data to contain all state from
+     * previously bound enrichments each time it is bound (or using a storage solution such as Ceramic Network).
      *
      * Requirements:
-     * - enrichment must not already be bound (if fungible is false)
+     * - enrichment must not already be bound (if non-fungible)
      * - msg.sender must have a positive balance of the enrichment
      * - msg.sender must own the token receiving the enrichment
      */
@@ -209,8 +222,14 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         uint256 enrichmentId,
         string memory uri
     ) public virtual {
+        uint256 balance = enrichmentBalanceOf(
+            contractAddress,
+            tokenId,
+            enrichmentId
+        );
+
         require(
-            enrichmentBalanceOf(contractAddress, tokenId, enrichmentId) == 0,
+            (isFungible(enrichmentId) == true) || (balance == 0),
             "FPNFE: token has enrichment"
         );
 
@@ -222,20 +241,25 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         );
 
         require(
-            _ownsToken(contractAddress, tokenId, operator),
+            ownsToken(contractAddress, tokenId, operator),
             "FPNFE: not token owner"
         );
 
         // transfer enrichment to contract
         _safeTransferFrom(operator, address(this), enrichmentId, 1, "");
 
-        // set uri and balances using enrichment key
+        // get enrichment key
         bytes32 enrichmentKey = _encodeEnrichmentKey(
             contractAddress,
             uint96(enrichmentId)
         );
 
-        _enrichmentURIs[enrichmentKey][tokenId] = uri;
+        // update the URI
+        if (bytes(uri).length > 0) {
+            _enrichmentURIs[enrichmentKey][tokenId] = uri;
+        }
+
+        // set balances
         _enrichmentBalances[enrichmentKey][tokenId] += 1;
 
         emit BindEnrichment(
@@ -271,15 +295,14 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
             "FPNFE: not bound"
         );
         require(
-            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET) !=
-                true,
+            _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET) == false,
             "FPNFE: can't be unbound"
         );
 
         address operator = _msgSender();
 
         require(
-            _ownsToken(contractAddress, tokenId, operator),
+            ownsToken(contractAddress, tokenId, operator),
             "FPNFE: sender does not own token"
         );
 
@@ -323,7 +346,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         // take payment using _asyncTransfer
         require(
             msg.value ==
-                _enrichmentState[enrichmentId].decodeUint255(_PRICE_OFFSET),
+                _enrichmentState[enrichmentId].decodeUint254(_PRICE_OFFSET),
             "FPNFE: wrong payment value"
         );
         _asyncTransfer(payee_, msg.value);
@@ -356,7 +379,7 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
         virtual
         returns (uint256)
     {
-        return _enrichmentState[enrichmentId].decodeUint255(_PRICE_OFFSET);
+        return _enrichmentState[enrichmentId].decodeUint254(_PRICE_OFFSET);
     }
 
     /**
@@ -370,6 +393,47 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     {
         return
             _enrichmentState[enrichmentId].decodeBool(_PERMANENT_FLAG_OFFSET);
+    }
+
+    /**
+     * @dev Return the enrichment fungible flag
+     */
+    function isFungible(uint256 enrichmentId)
+        public
+        view
+        virtual
+        returns (bool)
+    {
+        return _enrichmentState[enrichmentId].decodeBool(_FUNGIBLE_FLAG_OFFSET);
+    }
+
+    /**
+     * @dev Check if an NFT is owned by address. Security vulnerabilities of this function are mitigated
+     * by using a `staticcall` to the external token contract.
+     *
+     * Requirements:
+     * - `contractAddress` cannot be the zero address.
+     * - must be a successful staticcall
+     */
+    function ownsToken(
+        address contractAddress,
+        uint256 tokenId,
+        address owner
+    ) public view virtual returns (bool) {
+        require(
+            contractAddress != address(0),
+            "FPNFE: invalid contract address"
+        );
+        string memory func = (bytes(_contractOwnerOfFunctions[contractAddress])
+            .length != 0)
+            ? _contractOwnerOfFunctions[contractAddress]
+            : "ownerOf(uint256)";
+        bytes memory payload = abi.encodeWithSignature(func, tokenId);
+        (bool success, bytes memory returnData) = contractAddress.staticcall(
+            payload
+        );
+        require(success, "FPNFE: can't determine owner");
+        return (_bytesToAddress(returnData) == owner);
     }
 
     /**
@@ -411,47 +475,20 @@ contract FungyProofEnrichmentsBase is ERC1155URIBaseUpgradeable {
     }
 
     /**
-     * @dev Set the price and permanence for an enrichment
+     * @dev Set the price, fungibility and permanence state for an enrichment
      */
-    function _setPriceAndPermanence(
+    function _setEnrichmentState(
         uint256 enrichmentId,
         uint256 price,
+        bool fungible,
         bool permanent
     ) private {
         bytes32 enrichmentState;
 
         _enrichmentState[enrichmentId] = enrichmentState
-            .insertUint255(price, _PRICE_OFFSET)
+            .insertUint254(price, _PRICE_OFFSET)
+            .insertBool(fungible, _FUNGIBLE_FLAG_OFFSET)
             .insertBool(permanent, _PERMANENT_FLAG_OFFSET);
-    }
-
-    /**
-     * @dev Check if an NFT is owned by msg.sender. Security vulnerabilities of this function are reduced/mitigated
-     * by using a `staticcall` to the external token contract.
-     *
-     * Requirements:
-     * - `contractAddress` cannot be the zero address.
-     * - must be a successful staticcall
-     */
-    function _ownsToken(
-        address contractAddress,
-        uint256 tokenId,
-        address owner
-    ) private view returns (bool) {
-        require(
-            contractAddress != address(0),
-            "FPNFE: invalid contract address"
-        );
-        string memory func = (bytes(_contractOwnerOfFunctions[contractAddress])
-            .length != 0)
-            ? _contractOwnerOfFunctions[contractAddress]
-            : "ownerOf(uint256)";
-        bytes memory payload = abi.encodeWithSignature(func, tokenId);
-        (bool success, bytes memory returnData) = contractAddress.staticcall(
-            payload
-        );
-        require(success, "FPNFE: can't determine owner");
-        return (_bytesToAddress(returnData) == owner);
     }
 
     /**

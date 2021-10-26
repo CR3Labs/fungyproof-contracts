@@ -7,7 +7,7 @@ library WordCodec {
     // or to insert a new one replacing the old.
     uint256 private constant _MASK_1 = 2**(1) - 1;
     uint256 private constant _MASK_96 = 2**(96) - 1;
-    uint256 private constant _MASK_255 = 2**(255) - 1;
+    uint256 private constant _MASK_254 = 2**(254) - 1;
 
     // Encoding
 
@@ -25,17 +25,17 @@ library WordCodec {
     }
 
     /**
-     * @dev Inserts a 255 bit unsigned integer shifted by an offset into a 256 bit word, replacing the old value.
+     * @dev Inserts a 254 bit unsigned integer shifted by an offset into a 256 bit word, replacing the old value.
      * Returns the new word.
      *
-     * Assumes `value` only uses its least significant 255 bits, otherwise it may overwrite sibling bytes.
+     * Assumes `value` only uses its least significant 254 bits, otherwise it may overwrite sibling bytes.
      */
-    function insertUint255(
+    function insertUint254(
         bytes32 word,
         uint256 value,
         uint256 offset
     ) internal pure returns (bytes32) {
-        bytes32 clearedWord = bytes32(uint256(word) & ~(_MASK_255 << offset));
+        bytes32 clearedWord = bytes32(uint256(word) & ~(_MASK_254 << offset));
         return clearedWord | bytes32(value << offset);
     }
 
@@ -53,14 +53,14 @@ library WordCodec {
     }
 
     /**
-     * @dev Decodes and returns a 255 bit unsigned integer shifted by an offset from a 256 bit word.
+     * @dev Decodes and returns a 254 bit unsigned integer shifted by an offset from a 256 bit word.
      */
-    function decodeUint255(bytes32 word, uint256 offset)
+    function decodeUint254(bytes32 word, uint256 offset)
         internal
         pure
         returns (uint256)
     {
-        return uint256(word >> offset) & _MASK_255;
+        return uint256(word >> offset) & _MASK_254;
     }
 
     /**
