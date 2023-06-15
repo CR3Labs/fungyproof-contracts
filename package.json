@@ -60,6 +60,6 @@
     "withdraw": "hardhat withdraw",
     "printPayments": "hardhat printPayments",
     "proxyControl": "hardhat proxyControl",
-    "etherscan-verify": "hardhat etherscan-verify --api-key T4ZSJSAN118RBNQD22CTA5FCZ3G4YFHAKQ"
+    "etherscan-verify": "hardhat etherscan-verify --api-key ${ETHERSCAN_API_KEY}"
   }
 }
